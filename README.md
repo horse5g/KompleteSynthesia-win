@@ -182,3 +182,41 @@ Mk3, not yet on this S61 Mk2 setup.
 Reference implementations:
 - https://github.com/ktemkin/DrivenByKate
 - https://github.com/terminar/rebellion
+
+## Experimental Komplete Kontrol (KKiN) NI service compatibility
+
+The standard Encdr 0.9 NI service code registers as the Maschine NiM2 client.
+A working Windows S61 MK2 reported a four-byte refusal at the first NI
+bootstrap handshake, despite its HID device and both NI services working.
+
+This branch provides a **Windows-only compatibility service client**, based on
+Encdr 0.9's GPL-licensed named-pipe transport, with separate client identifiers
+for Komplete Kontrol (KKiN) and Maschine (NiM2). It still uses Encdr's original
+hardware screen RLE encoder and instance-setup protocol. No USB driver changes.
+
+Default behavior: try KKiN first, then fall back to NiM2, with diagnostic
+messages identifying the pipe, role, and registration stage.
+
+    python -m kompletesynthesia --test-pattern --no-midi
+    python -m kompletesynthesia --test-pattern --no-midi --ni-role kontrol
+    python -m kompletesynthesia --test-pattern --no-midi --ni-role maschine
+
+The selected role is passed as KSW_NI_ROLE to the Rust helper; no persistent
+system environment variable is modified. If neither role works, run the
+Python-only probes:
+
+    python -m kompletesynthesia --diagnose-ni
+    python -m kompletesynthesia --probe-ni-handshakes
+
+To verify that you are running the updated helper, rebuild it after pulling:
+
+    cargo build --release --manifest-path native/encdr_bridge/Cargo.toml
+
+The helper is hardware-unverified on this S61 MK2. A successful client
+registration does **not** necessarily mean NI service screen ownership and
+display streaming work. If the error moves from device bootstrap to the
+instance bootstrap or frame submission, please share the full stderr output.
+
+The compatibility service transport is adapted from Encdr 0.9.0 (GPL 3.0+),
+with thanks to ktemkin/DrivenByKate and terminar/rebellion for their
+Komplete Kontrol client-identifier documentation.

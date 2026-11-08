@@ -42,6 +42,8 @@ def parser():
                    help="Mirror across both displays or original left-only view")
     p.add_argument("--fps", type=int, help="Frames per second, 1-30")
     p.add_argument("--bridge", help="Path to encdr_bridge.exe")
+    p.add_argument("--ni-role", choices=("auto", "kontrol", "maschine"), default="auto",
+                   help="NI service client-kind preference (default: auto, Komplete first)")
     p.add_argument("--config", type=Path, help="Override the settings.json location")
     p.add_argument("--init-config", action="store_true", help="Write default config and exit")
     p.add_argument("--settings", action="store_true", help="Open preferences window and exit")
@@ -206,7 +208,7 @@ def run(argv=None) -> int:
             else:
                 from .bridge import EncdrBridge
                 hardware = stack.enter_context(
-                    EncdrBridge(args.bridge, on_event=on_hardware_event)
+                    EncdrBridge(args.bridge, on_event=on_hardware_event, ni_role=args.ni_role)
                 )
 
             hardware.set_lights(light_guide.colors())

@@ -5,8 +5,10 @@
 
 use std::io::{self, Read};
 use std::sync::mpsc::{self, Receiver};
+#[cfg(not(windows))]
 use std::time::Duration;
 
+#[cfg(not(windows))]
 use encdr::{Encdr, EncdrConfig, Event, LedValue};
 use serde_json::json;
 
@@ -63,6 +65,8 @@ fn main() {
     }
 }
 
+#[cfg(windows)]
+mod ni_service_compat;
 #[cfg(windows)]
 mod windows_hid_service;
 

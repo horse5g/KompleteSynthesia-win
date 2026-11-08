@@ -9,6 +9,7 @@ does not produce a second, misleading '[Errno 32] Broken pipe' traceback.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import threading
@@ -34,9 +35,12 @@ def find_bridge(explicit: str | None = None) -> Path:
 
 
 class EncdrBridge:
-    def __init__(self, binary: str | None = None, on_event=None):
+    def __init__(self, binary: str | None = None, on_event=None, ni_role: str = "auto"):
         self.binary = find_bridge(binary)
         self.on_event = on_event or (lambda event: None)
+        if ni_role not in ("auto", "kontrol", "maschine"):
+            raise ValueError(f"Unknown NI client role {ni_role!r}")
+        self.ni_role = ni_role
         self.process: subprocess.Popen | None = None
         self.lock = threading.Lock()
         self.output_thread: threading.Thread | None = None
@@ -47,12 +51,13 @@ class EncdrBridge:
         self.process = subprocess.Popen(
             [str(self.binary)], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=None, bufsize=0,
+            env={**os.environ, "KSW_NI_ROLE": self.ni_role},
         )
         self.output_thread = threading.Thread(
             target=self._events, name="hardware-events", daemon=True
         )
         self.output_thread.start()
-        if not self.ready.wait(timeout=30):
+        if not self.ready.wait(timeout=75):
             self._terminate()
             raise RuntimeError("Hardware helper startup timed out; check stderr logs")
         if self.startup_error:

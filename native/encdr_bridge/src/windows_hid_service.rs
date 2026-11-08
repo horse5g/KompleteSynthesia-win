@@ -8,7 +8,7 @@ use std::sync::mpsc::{sync_channel, TrySendError};
 use std::time::Duration;
 
 use encdr::screen::protocol::encode_ni_color_rle;
-use encdr::usb::ni_service;
+use crate::ni_service_compat as ni_service;
 use hidapi::{HidApi, HidDevice};
 use serde_json::json;
 
@@ -173,9 +173,10 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     // Windows driver installation. It must be installed and running.
     let service = ni_service::connect_with_retry(PID, None, Duration::from_secs(5))
         .map_err(|e| format!(
-            "S61 HID works, but the NI screen service cannot be opened: {e}. \
-             Check NIHostIntegrationAgent and NIHardwareService in Windows Services; \
-             install/repair Komplete Kontrol through Native Access if missing"
+            "S61 HID works, but NI screen registration failed: {e}. \
+             If NIHostIntegrationAgent and NIHardwareService are running, \
+             this is a protocol or client-registration issue, not missing USB drivers. \
+             Try --ni-role kontrol or --ni-role maschine for more targeted diagnostics."
         ))?;
 
     // Decouple screen encoding and blocking NI service IPC from key presses.
