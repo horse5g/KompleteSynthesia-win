@@ -57,7 +57,7 @@ class EncdrBridge:
             target=self._events, name="hardware-events", daemon=True
         )
         self.output_thread.start()
-        if not self.ready.wait(timeout=30):
+        if not self.ready.wait(timeout=75):
             self._terminate()
             raise RuntimeError("Hardware helper startup timed out; check stderr logs")
         if self.startup_error:
