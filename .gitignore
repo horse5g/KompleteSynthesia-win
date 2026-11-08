@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+native/encdr_bridge/target/
+bin/
+*.exe
