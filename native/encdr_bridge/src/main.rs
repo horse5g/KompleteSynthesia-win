@@ -63,6 +63,15 @@ fn main() {
     }
 }
 
+#[cfg(windows)]
+mod windows_hid_service;
+
+#[cfg(windows)]
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    windows_hid_service::run()
+}
+
+#[cfg(not(windows))]
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut driver = Encdr::new(EncdrConfig::default())?;
     let device = driver.scan()?.into_iter().find(|id| {
