@@ -113,6 +113,13 @@ def run(argv=None) -> int:
             LOG.error("%s", exc)
             return 2
         LOG.info("Synthesia lighting MIDI: %s", light_port)
+        if "komplete kontrol" in light_port.casefold():
+            LOG.warning(
+                "%s appears to be a physical S61 keyboard MIDI input, "
+                "not a virtual MIDI loopback for Synthesia output. "
+                "Use a MIDI Services loopback or loopMIDI for falling-note lights.",
+                light_port,
+            )
         if keyboard_port:
             LOG.info("Physical keyboard MIDI: %s", keyboard_port)
         elif not args.no_keyboard_midi:

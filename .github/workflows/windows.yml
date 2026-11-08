@@ -17,6 +17,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Compile Encdr helper
         run: cargo build --manifest-path native/encdr_bridge/Cargo.toml --release
+      - name: Rust helper tests (Windows HID / NI service protocol)
+        run: cargo test --manifest-path native/encdr_bridge/Cargo.toml --release
       - name: Prepare release artifact
         shell: pwsh
         run: |

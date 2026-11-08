@@ -11,6 +11,13 @@ Light Guide, controls, and dual 480x272 displays.
 compilation, not the physical USB device. Do not replace Native Instruments USB
 drivers with Zadig for this project.
 
+**Windows HID/service fallback:** The normal S61 MK2 Windows drivers do not
+expose a WinUSB endpoint for nusb discovery. The Windows helper now opens the
+keyboard's vendor-defined HID interface (MI_02) directly, and uses Encdr's
+public Native Instruments service protocol for the two screen displays
+(MI_03). No driver swap is required. The NI services must be installed and
+running; see troubleshooting below.
+
 ## Ported behavior
 
 - Synthesia finger-channel MIDI lights, left/right hands and thumbs
@@ -111,3 +118,33 @@ bridge. The physical Setup button opens the same editor.
 
 See PORTING.md for full feature-by-feature progress and
 THIRD_PARTY_NOTICES.md for MIT attribution and license details.
+
+## Windows S61 MK2 detection troubleshooting
+
+If direct Light Guide testing works but the display test fails, first make sure
+the compiled helper is current. After pulling the latest code, rebuild with:
+
+    cargo build --release --manifest-path native/encdr_bridge/Cargo.toml
+    python -m kompletesynthesia --test-pattern --no-midi
+
+The development version prefers target/release/encdr_bridge.exe over an older
+bin/encdr_bridge.exe if both exist. The hardware helper now reports which
+interface or service it cannot open, rather than returning the generic
+'nusb did not detect S61 MK2' message.
+
+To inspect Native Instruments services (PowerShell):
+
+    Get-Service | Where-Object { $_.Name -match 'NIHostIntegration|NIHardware' } | Format-Table Name,Status,StartType
+    Test-Path 'C:\Program Files\Common Files\Native Instruments\Hardware\NIHostIntegrationAgent.exe'
+
+The NI hardware service is required for display streaming. The Windows
+process 'NisSrv.exe' is a Microsoft Defender component, **not** a Native
+Instruments background service. If the NI services are missing, install or
+repair Komplete Kontrol or Controller Editor through Native Access.
+Do **not** replace MI_03 (Komplete Kontrol S61 MK2 BD) with WinUSB: doing so
+can break Native Instruments' official display integration.
+
+Windows MIDI note input (KOMPLETE KONTROL - 1 1) is a physical keyboard port,
+not a Synthesia MIDI output loopback. To receive the falling-note light commands,
+use a Windows MIDI Services loopback pair or a virtual loopback port as described
+above.
