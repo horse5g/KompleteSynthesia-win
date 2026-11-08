@@ -1,148 +1,113 @@
 # KompleteSynthesia-win
 
-**Windows 11 Python bridge for Synthesia and the Native Instruments Komplete Kontrol S61 MK2.**
+Experimental **Windows 11 port of tillt/KompleteSynthesia** for Native Instruments Komplete Kontrol S61 MK2.
 
-This is an **early hardware-testing prototype**, not a verified turnkey solution.
-The Light Guide can run directly from Python, while the two 480x272 keyboard
-screens are driven through a tiny Rust helper using the existing `encdr` crate.
-Synthesia MIDI parsing, capture, scaling, configuration, and application logic
-are Python. No USB driver replacements or Zadig are intended.
+Original macOS source: https://github.com/tillt/KompleteSynthesia (MIT).
+This port reimplements application behavior in Python and uses a small Rust helper
+with the already-existing Encdr library (GPL-3.0-or-later) for the keyboard's
+Light Guide, controls, and dual 480x272 displays.
 
-## Features in this first milestone
+**Hardware not yet validated.** Green CI only verifies Python tests and
+compilation, not the physical USB device. Do not replace Native Instruments USB
+drivers with Zadig for this project.
 
-- Synthesia's *Finger-based channel* note colors on the 61-key Light Guide.
-- Synthesia MIDI note-on/note-off and all-notes-off handling.
-- 960x272 combined image sent to the keyboard's two displays through Encdr.
-- Screen test pattern for isolating hardware problems from capture problems.
-- Captures the **visible** Windows client area of Synthesia; `fit`, `fill`, and
-  `stretch` layouts. A covered or minimized window cannot be mirrored reliably.
-- Logs hardware button and encoder events; playback mappings are **not yet** enabled.
-- MIDI Services native loopback support without requiring LoopBe1.
+## Ported behavior
+
+- Synthesia finger-channel MIDI lights, left/right hands and thumbs
+- Played-note highlighting from the keyboard's separate MIDI Port 1 input
+- Eight saved Light Guide palette colors (including played-note colors)
+- Play, jogwheel, Page, top 1–5, Clear, Scene, Setup and volume encoder shortcuts
+- Two screen layouts: span (960x272) and original-style left-only (480x272)
+- Persistent JSON preferences and a Windows Tk preferences window
+- Native SendInput shortcuts, guarded so typing cannot target unrelated apps
+- MIDI Services loopback compatibility, without requiring LoopBe1 if the
+  Windows loopback endpoints are available to Synthesia and RtMidi
+- Screen test pattern and light-only hardware diagnostic mode
 
 ## Requirements
 
-- Windows 11, 64-bit Python 3.11+ (tested in CI, not yet with physical hardware).
-- Native Instruments S61 MK2 (`17cc:1620`), connected and powered.
-- Synthesia for Windows.
-- For screens, Native Instruments driver/background hardware services installed;
-  Encdr's Windows service route must successfully communicate with the keyboard.
-- Windows MIDI Services with a built-in app loopback **or** any compatible MIDI
-  loopback; the application **does not create a virtual MIDI device** itself.
+- Windows 11 x64 with Python 3.11 or later and Synthesia
+- Native Instruments drivers/services as required by Encdr's Windows display transport
+- A Windows MIDI Services loopback pair, or another compatible virtual MIDI port
+- The encdr_bridge.exe prebuilt Windows build artifact, or Rust/MSVC to build it
+
+This app does not create a virtual MIDI port by itself.
 
 ## Installation
 
-```powershell
-git clone https://github.com/horse5g/KompleteSynthesia-win.git
-cd KompleteSynthesia-win
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
+Clone https://github.com/horse5g/KompleteSynthesia-win and run in PowerShell:
 
-For the screens, use the `KompleteSynthesia-win-W11` artifact from GitHub Actions
-and copy `bin/encdr_bridge.exe` into this repository's `bin/` folder, **or**
-build the native helper locally (Rust and MSVC C++ build tools required):
+    py -3.11 -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+    python -m pip install -r requirements.txt
 
-```powershell
-cargo build --release --manifest-path native/encdr_bridge/Cargo.toml
-```
+Get the KompleteSynthesia-win-W11 artifact from
+https://github.com/horse5g/KompleteSynthesia-win/actions
+and put its bin/encdr_bridge.exe into this repository's bin directory.
 
-The light-only mode below **does not require Rust or the helper binary**.
+Or build the helper locally:
 
-## Windows MIDI Services setup (no LoopBe1 required)
+    cargo build --release --manifest-path native/encdr_bridge/Cargo.toml
 
-For supported Windows 11 versions, Windows MIDI Services includes a default
-application loopback with two ends, **Default App Loopback (A)** and **(B)**.
-Confirm availability on your PC in Windows MIDI Settings or with `--list-midi`.
+## MIDI setup (no LoopBe1 if Windows MIDI Services loopback works)
 
-1. In **Synthesia → Settings → Music Devices**, select
-   **Default App Loopback (A)** as a MIDI output.
-2. Enable **Key Lights → Finger-based channel** for that output.
-3. Receive on **Default App Loopback (B)** in this app. The two ends are
-   paired; sending to one is received at the other.
-4. If the built-in loopback isn't exposed on your Windows build, configure a
-   Windows MIDI Services developer loopback or another virtual MIDI port, then
-   provide the exact receiving port with `--midi-port`.
+In Synthesia -> Settings -> Music Devices, select Default App Loopback (A)
+as a MIDI output and set Key Lights to Finger-based channel. The app listens
+on Default App Loopback (B). This is only available if both ends are exposed
+on your installation to Synthesia and mido/python-rtmidi. Otherwise configure
+another virtual loopback port and pass its input name via --midi-port.
 
-> Note: Windows MIDI Services and the user-facing loopback setup tools have
-> different release schedules. The Python MIDI backend **cannot create** a
-> virtual input port on Windows using `mido`/`python-rtmidi` alone.
+The physical keyboard's MIDI Port 1 input is separate and optional.
+Use --list-midi to see device names and --keyboard-midi-port to select one.
 
-## First test: Light Guide only
+## Run
 
-```powershell
-python -m kompletesynthesia --list-midi
-python -m kompletesynthesia --light-only --midi-port "Default App Loopback (B)"
-```
+    python -m kompletesynthesia --list-midi
+    python -m kompletesynthesia --light-only --midi-port "Default App Loopback (B)"
+    python -m kompletesynthesia --test-pattern --no-midi
+    python -m kompletesynthesia --midi-port "Default App Loopback (B)"
+    python -m kompletesynthesia --display-layout left
+    python -m kompletesynthesia --settings
+    python -m kompletesynthesia --init-config
+    python -m unittest discover -s tests -v
 
-This opens the S61 MK2 HID interface directly and does not use Encdr.
-**Do not run the light-only mode alongside the screen bridge** because both
-may claim the keyboard's HID interface. Confirm lighting follows the falling
-notes and that left/right hands have different colors.
+Use --help for other options. Ctrl+C exits and attempts to turn off the LEDs.
 
-## Second test: hardware screens
+## Ported controls
 
-```powershell
-python -m kompletesynthesia --test-pattern --no-midi
-```
+| Hardware control | Windows action |
+| --- | --- |
+| Play | Space |
+| Main jog press and directions | Enter / arrow keys |
+| Main jog rotation | Mouse wheel |
+| Page left / right | Z / X |
+| Top buttons 1, 2, 3, 4 | Escape / F2 / F3 / F4 |
+| Top button 5 | Toggle screen mirror |
+| Clear | Clear notes and LEDs |
+| Scene | Launch Synthesia if detected |
+| Setup | Launch the settings editor |
+| Encoder 1 | Windows master volume up/down |
 
-Both displays should show `S61 MK2 - LEFT` and `S61 MK2 - RIGHT` on separate
-panels. The Light Guide will have a static left/right split. This test isolates
-Encdr's service routing from capture and MIDI. If it fails, capture and MIDI
-changes won't fix the underlying display connection.
+--no-controls disables these shortcuts.
 
-## Full MVP: screen mirror + Light Guide
+## Preferences
 
-Open Synthesia and leave its window visible on the desktop:
+Run python -m kompletesynthesia --settings to edit the colors, mirroring
+defaults and shortcuts. Settings live in the Windows LOCALAPPDATA directory,
+under KompleteSynthesia-win/settings.json. Changes require restarting the
+bridge. The physical Setup button opens the same editor.
 
-```powershell
-python -m kompletesynthesia --midi-port "Default App Loopback (B)" --fps 12
-```
+## Known limitations
 
-Switch layouts as desired:
+- Current screen capture uses mss on the visible desktop. A window obscuring
+  Synthesia will also be captured. Minimized-window capture is unsupported.
+  A WinRT Windows Graphics Capture backend is planned.
+- The original macOS menu-bar status icon, update checks, automatic Synthesia
+  XML configuration patch, and volume OSD are not yet ported.
+- The settings editor is simpler than the original Cocoa palette picker.
+- Exact physical device MIDI port names, Encdr display transport, and control
+  mapping still require hardware testing.
+- Light-only mode and Encdr bridge should not run simultaneously.
 
-```powershell
-python -m kompletesynthesia --capture-mode fill --fps 15
-```
-
-`fit` shows the full application with black margins. `fill` crops to the wide
-960x272 aspect ratio (may cut off keyboard or controls), while `stretch`
-shows everything but distorts proportions. All three modes are provisional;
-a dedicated piano-roll crop and per-screen layout are planned.
-
-Press Ctrl+C to stop. The application attempts to clear the LEDs on exit.
-
-## Troubleshooting
-
-- **No MIDI ports:** Run `--list-midi`. A MIDI Service being installed does
-  not guarantee a default loopback endpoint is available to legacy WinMM apps.
-- **No notes lighting:** Check Synthesia *MIDI output*, the receiving port
-  paired with it, and *Finger-based channel* mode.
-- **Screen test fails:** Confirm NI services are running, the S61 MK2 is not
-  owned by another program, and check the helper's stderr output. Do **not**
-  use Zadig to replace Native Instruments drivers.
-- **Captured picture is covered or black:** This first version uses visible
-  desktop capture (`mss`), not Windows Graphics Capture; leave Synthesia
-  visible. A future WGC implementation can capture occluded windows.
-- **Controls:** The helper outputs button/encoder events for diagnostics; the
-  Synthesia shortcut mapping is deferred pending actual S61 MK2 testing.
-
-## Testing
-
-```powershell
-python -m unittest discover -s tests -v
-```
-
-GitHub Actions builds a Windows helper and uploads a combined artifact; this
-validates compilation and pure-Python tests, **not physical keyboard operation**.
-
-## Credits and licensing
-
-- [SynthesiaKontrol](https://github.com/ojacques/SynthesiaKontrol) (MIT):
-  published the Mk2 palette values, note ranges, and finger-channel semantics.
-- [Encdr](https://github.com/RufusIbiza/Encdr) (GPL-3.0-or-later):
-  underlying dual-display/LED/button hardware library.
-
-Our source is licensed under **GPL-3.0-or-later** for compatibility with Encdr;
-third-party dependencies retain their own licenses. No Encdr source code is
-vendored here.
+See PORTING.md for full feature-by-feature progress and
+THIRD_PARTY_NOTICES.md for MIT attribution and license details.
