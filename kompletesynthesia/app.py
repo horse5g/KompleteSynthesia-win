@@ -25,6 +25,10 @@ def parser():
     p = argparse.ArgumentParser(
         description="KompleteSynthesia for Windows 11 — Native Instruments S61 MK2")
     p.add_argument("--list-midi", action="store_true", help="List MIDI input ports")
+    p.add_argument("--diagnose-ni", action="store_true",
+                   help="Probe NI hardware-service version endpoints without connecting")
+    p.add_argument("--probe-ni-handshakes", action="store_true",
+                   help="Compare short-lived Komplete Kontrol and Maschine NI registration handshakes")
     p.add_argument("--midi-port", help="Synthesia output loopback MIDI input")
     p.add_argument("--keyboard-midi-port", help="Physical S61 MK2 Port 1 MIDI input")
     p.add_argument("--no-midi", action="store_true", help="Disable both MIDI receivers")
@@ -78,6 +82,11 @@ def run(argv=None) -> int:
         LOG.error("%s", exc)
         return 2
 
+    if args.diagnose_ni or args.probe_ni_handshakes:
+        from .ni_probe import diagnostics
+        for line in diagnostics(probe_connections=args.probe_ni_handshakes):
+            print(line)
+        return 0
     if args.list_midi:
         for name in available_inputs():
             print(name)

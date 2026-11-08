@@ -148,3 +148,37 @@ Windows MIDI note input (KOMPLETE KONTROL - 1 1) is a physical keyboard port,
 not a Synthesia MIDI output loopback. To receive the falling-note light commands,
 use a Windows MIDI Services loopback pair or a virtual loopback port as described
 above.
+
+## Diagnose an NI screen-service handshake refusal
+
+If both NI services are running but the screen test reports something like
+"NI service refused the connection (reply [6c, 74, 63, 65])", the HID
+driver is working and the failure is at the named-pipe registration stage.
+Do not install other USB drivers or reinstall NI software as a first response.
+
+First run the read-only version probe (no keyboard needed):
+
+    python -m kompletesynthesia --diagnose-ni
+
+If a NI endpoint responds, close Komplete Kontrol and DAWs that may own
+the controller, then run the experimental handshake comparison:
+
+    python -m kompletesynthesia --probe-ni-handshakes
+
+The comparison sends one short-lived registration header using Komplete
+Kontrol's KKiN client identifier, and one using Encdr's Maschine NiM2
+identifier, to each available bootstrap pipe. Connections are closed
+immediately without controlling the displays, but successful responses
+can temporarily register a client. No firmware, drivers, services or
+persistent settings are changed.
+
+Share the version and acceptance status for each pipe. Successful bootstrap
+registration does not prove that LCD control or the full protocol will work.
+
+These are diagnostics, not a fix. Encdr 0.9.0 hard-codes the Maschine
+identifier. Its NI service route has been hardware verified on a Maschine
+Mk3, not yet on this S61 Mk2 setup.
+
+Reference implementations:
+- https://github.com/ktemkin/DrivenByKate
+- https://github.com/terminar/rebellion
