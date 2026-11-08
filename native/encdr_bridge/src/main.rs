@@ -1,13 +1,13 @@
-//! Minimal hardware-only adapter for Encdr 0.9.0.
-//! Python owns MIDI, screen capture, colors, application UI and its lifecycle.
-//! Binary stdin: b'L' + 61 bytes, b'F' + (960*272*4) RGBA bytes, b'Q'.
-//! Stdout emits one JSON event per line; stderr is for diagnostics.
+//! Encdr 0.9 hardware adapter for Windows KompleteSynthesia.
+//! Python handles MIDI, palette, capture, controls, and settings.
+//! Protocol: stdin 'L' + 61 colors, 'F' + 960x272 RGBA frame, 'Q'.
+//! stdout emits one JSON event per line; stderr reports diagnostics.
 
 use std::io::{self, Read};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
-use encdr::{Encdr, EncdrConfig, Event};
+use encdr::{Encdr, EncdrConfig, Event, LedValue};
 use serde_json::json;
 
 const FRAME_BYTES: usize = 960 * 272 * 4;
@@ -70,12 +70,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             desc.vendor_id.0 == 0x17cc && desc.product_id.0 == 0x1620
         })
     }).ok_or("S61 MK2 (17cc:1620) not detected by Encdr")?;
-    let device_name = driver.device_descriptor(device).unwrap().name.clone();
+    let name = driver.device_descriptor(device).unwrap().name.clone();
     let events = driver.events().clone();
     let commands = receive_commands();
-    emit(json!({"kind": "ready", "device": device_name}));
-    driver.set_led_strip(device, "light_guide", &[0u8; 61]);
 
+    // Emulate the macOS app's illuminated Play and display-control buttons.
+    driver.set_led(device, "play", LedValue::Single(180));
+    driver.set_led(device, "top_5", LedValue::Single(100));
+    driver.set_led_strip(device, "light_guide", &[0u8; 61]);
+    emit(json!({"kind": "ready", "device": name}));
+
+    let mut disconnected = false;
     loop {
         while let Ok(event) = events.try_recv() {
             match event {
@@ -87,10 +92,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     emit(json!({"kind": "encoder", "name": name, "delta": delta})),
                 Event::DeviceDisconnected { .. } => {
                     emit(json!({"kind": "error", "message": "S61 MK2 disconnected"}));
+                    disconnected = true;
                     break;
                 }
                 _ => {}
             }
+        }
+        if disconnected {
+            break;
         }
         match commands.try_recv() {
             Ok(Command::Lights(colors)) => driver.set_led_strip(device, "light_guide", &colors),
@@ -104,5 +113,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     driver.set_led_strip(device, "light_guide", &[0u8; 61]);
+    driver.set_led(device, "play", LedValue::Off);
+    driver.set_led(device, "top_5", LedValue::Off);
     Ok(())
 }
