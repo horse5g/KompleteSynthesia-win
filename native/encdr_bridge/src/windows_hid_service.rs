@@ -8,7 +8,7 @@ use std::sync::mpsc::{sync_channel, TrySendError};
 use std::time::Duration;
 
 use encdr::screen::protocol::encode_ni_color_rle;
-use encdr::usb::ni_service;
+use crate::ni_service_compat as ni_service;
 use hidapi::{HidApi, HidDevice};
 use serde_json::json;
 
