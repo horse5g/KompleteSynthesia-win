@@ -49,8 +49,19 @@ fn words(parts: &[u32]) -> Vec<u8> {
     parts.iter().flat_map(|part| part.to_le_bytes()).collect()
 }
 
-fn device_connect(product_id: u16, kind: u32) -> Vec<u8> {
-    words(&[0x0344_7500, product_id as u32, kind, CLIENT_ROLE, 0])
+/// Global registration is usually a 21-byte packet on Windows:
+/// five LE u32 words, final serial length = 1, and one trailing NUL.
+/// Encdr's earlier 20-byte version declared serial length = 0 and
+/// omitted the NUL. Preserve that older framing as a fallback.
+fn device_connect(product_id: u16, kind: u32, terminated_serial: bool) -> Vec<u8> {
+    let mut packet = words(&[
+        0x0344_7500, product_id as u32, kind, CLIENT_ROLE,
+        if terminated_serial { 1 } else { 0 },
+    ]);
+    if terminated_serial {
+        packet.push(0);
+    }
+    packet
 }
 
 fn instance_connect(product_id: u16, serial: &str, kind: u32) -> Vec<u8> {
@@ -293,21 +304,35 @@ impl ServiceSession {
     pub fn connect(product_id: u16, serial: Option<&str>, timeout: Duration) -> Result<Self, String> {
         let mut failures = Vec::new();
         let mut checked = false;
-        for kind in roles_to_try() {
-            for &bootstrap_name in protocol::BOOTSTRAP_PIPES {
-                if ClientPipe::open(bootstrap_name, 1).is_err() {
-                    continue;
-                }
-                checked = true;
-                eprintln!("NI service handshake: pipe={bootstrap_name}, role={}", role_label(kind));
-                match Self::connect_via(bootstrap_name, product_id, serial, timeout, kind) {
-                    Ok(session) => {
-                        eprintln!("NI service handshake accepted: pipe={bootstrap_name}, role={}", role_label(kind));
-                        return Ok(session);
+        // Prioritize the framing used by DrivenByKate's Windows NI client.
+        // Retain Encdr's original zero-length frame if the service requires it.
+        for terminated in [true, false] {
+            let framing = if terminated { "nul-terminated-21" } else { "zero-length-20" };
+            for kind in roles_to_try() {
+                for &bootstrap_name in protocol::BOOTSTRAP_PIPES {
+                    if ClientPipe::open(bootstrap_name, 1).is_err() {
+                        continue;
                     }
-                    Err(err) => {
-                        eprintln!("NI service handshake failed: pipe={bootstrap_name}, role={}: {err}", role_label(kind));
-                        failures.push(format!("{bootstrap_name}/{}: {err}", role_label(kind)));
+                    checked = true;
+                    eprintln!(
+                        "NI service handshake: pipe={bootstrap_name}, role={}, frame={framing}",
+                        role_label(kind)
+                    );
+                    match Self::connect_via(bootstrap_name, product_id, serial, timeout, kind, terminated) {
+                        Ok(session) => {
+                            eprintln!(
+                                "NI service handshake accepted: pipe={bootstrap_name}, role={}, frame={framing}",
+                                role_label(kind)
+                            );
+                            return Ok(session);
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "NI service handshake failed: pipe={bootstrap_name}, role={}, frame={framing}: {err}",
+                                role_label(kind)
+                            );
+                            failures.push(format!("{bootstrap_name}/{}/{framing}: {err}", role_label(kind)));
+                        }
                     }
                 }
             }
@@ -324,9 +349,10 @@ impl ServiceSession {
         serial: Option<&str>,
         timeout: Duration,
         kind: u32,
+        terminated_serial: bool,
     ) -> Result<Self, String> {
         let (tx, rx) = channel::<Vec<u8>>();
-        let device = register(bootstrap_name, &device_connect(product_id, kind), &tx)
+        let device = register(bootstrap_name, &device_connect(product_id, kind, terminated_serial), &tx)
             .map_err(|e| format!("device bootstrap: {e}"))?;
         device.write(&protocol::device_state_request()).map_err(|e| format!("device state request: {e}"))?;
 
@@ -379,9 +405,22 @@ mod tests {
     use super::*;
     #[test]
     fn kontrol_role_packets_use_distinct_kind() {
-        assert_eq!(device_connect(0x1620, KONTROL_ROLE)[8..12], KONTROL_ROLE.to_le_bytes());
-        assert_eq!(device_connect(0x1620, MASCHINE_ROLE)[8..12], MASCHINE_ROLE.to_le_bytes());
+        assert_eq!(device_connect(0x1620, KONTROL_ROLE, true)[8..12], KONTROL_ROLE.to_le_bytes());
+        assert_eq!(device_connect(0x1620, MASCHINE_ROLE, true)[8..12], MASCHINE_ROLE.to_le_bytes());
         assert_eq!(instance_connect(0x1620, "XYZ", KONTROL_ROLE)[20..], *b"XYZ\0");
         assert_eq!(&instance_connect(0x1620, "XYZ", KONTROL_ROLE)[16..20], &4u32.to_le_bytes());
+    }
+
+    #[test]
+    fn bootstrap_null_terminated_and_legacy_frames() {
+        let modern = device_connect(0x1620, KONTROL_ROLE, true);
+        assert_eq!(modern.len(), 21);
+        assert_eq!(&modern[..8], &[0x00, 0x75, 0x44, 0x03, 0x20, 0x16, 0, 0]);
+        assert_eq!(&modern[16..20], &1u32.to_le_bytes());
+        assert_eq!(modern[20], 0);
+
+        let legacy = device_connect(0x1620, KONTROL_ROLE, false);
+        assert_eq!(legacy.len(), 20);
+        assert_eq!(&legacy[16..20], &0u32.to_le_bytes());
     }
 }

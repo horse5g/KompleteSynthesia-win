@@ -165,9 +165,10 @@ the controller, then run the experimental handshake comparison:
 
     python -m kompletesynthesia --probe-ni-handshakes
 
-The comparison sends one short-lived registration header using Komplete
-Kontrol's KKiN client identifier, and one using Encdr's Maschine NiM2
-identifier, to each available bootstrap pipe. Connections are closed
+The comparison sends short-lived registration headers using both Komplete
+Kontrol's KKiN and Maschine's NiM2 client identifiers, each with two serial
+framing options (21-byte null-terminated and legacy 20-byte), to each available
+bootstrap pipe. Connections are closed
 immediately without controlling the displays, but successful responses
 can temporarily register a client. No firmware, drivers, services or
 persistent settings are changed.
@@ -220,3 +221,36 @@ instance bootstrap or frame submission, please share the full stderr output.
 The compatibility service transport is adapted from Encdr 0.9.0 (GPL 3.0+),
 with thanks to ktemkin/DrivenByKate and terminar/rebellion for their
 Komplete Kontrol client-identifier documentation.
+
+## NI service bootstrap framing compatibility (Windows)
+
+On an S61 MK2 with both NI services running, trying KKiN and NiM2 with
+Encdr's 20-byte, serial-length-zero bootstrap returned the same four-byte
+response, `6c 74 63 65`, from both NI named pipes. Neither identifier alone
+resolved it.
+
+A separate Windows integration, DrivenByKate's WindowsNIHostInterop, sends a
+**21-byte** bootstrap even without a device serial: last 32-bit field is
+serial length 1 and the final byte is NUL. The compatibility helper now tries
+this 21-byte request **first** for each identifier and endpoint. If all
+are rejected, it tries the former 20-byte request as fallback.
+
+    python -m kompletesynthesia --test-pattern --no-midi
+
+Look for a log field:
+
+    frame=nul-terminated-21
+    frame=zero-length-20
+
+To compare individual bootstrap replies without opening the HID device:
+
+    python -m kompletesynthesia --probe-ni-handshakes
+
+Version probes return two 32-bit words, which are normal protocol/version
+responses and not a sign of service failure. A four-byte status response
+does not alone identify why the service rejected a registration.
+
+This is still hardware-unverified: if device registration succeeds but
+instance registration or LCD frame submission fails, retain the exact logs
+to identify the next incompatibility. No drivers or installed NI services
+are modified.
