@@ -35,8 +35,12 @@ def find_bridge(explicit: str | None = None) -> Path:
 
 
 class EncdrBridge:
-    def __init__(self, binary: str | None = None, on_event=None, ni_role: str = "auto"):
+    def __init__(self, binary: str | None = None, on_event=None, ni_role: str = "auto",
+                 hid_only: bool = False, allow_no_screens: bool = False):
         self.binary = find_bridge(binary)
+        self.hid_only = bool(hid_only)
+        self.allow_no_screens = bool(allow_no_screens)
+        self.screens: bool | None = None
         self.on_event = on_event or (lambda event: None)
         if ni_role not in ("auto", "kontrol", "maschine"):
             raise ValueError(f"Unknown NI client role {ni_role!r}")
@@ -51,7 +55,9 @@ class EncdrBridge:
         self.process = subprocess.Popen(
             [str(self.binary)], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=None, bufsize=0,
-            env={**os.environ, "KSW_NI_ROLE": self.ni_role},
+            env={**os.environ, "KSW_NI_ROLE": self.ni_role,
+                 "KSW_HID_ONLY": "1" if self.hid_only else "0",
+                 "KSW_ALLOW_NO_SCREENS": "1" if self.allow_no_screens else "0"},
         )
         self.output_thread = threading.Thread(
             target=self._events, name="hardware-events", daemon=True
@@ -79,6 +85,7 @@ class EncdrBridge:
                     self.ready.set()
                     continue
                 if kind == "ready":
+                    self.screens = bool(event.get("screens", True))
                     self.ready.set()
                 try:
                     self.on_event(event)

@@ -35,6 +35,10 @@ def parser():
     p.add_argument("--no-keyboard-midi", action="store_true", help="Disable the physical keyboard receiver")
     p.add_argument("--no-controls", action="store_true", help="Disable hardware shortcut forwarding")
     p.add_argument("--light-only", action="store_true", help="Direct HID LEDs only, no screens")
+    p.add_argument("--hid-only", action="store_true",
+                   help="Use Rust HID backend for lights and physical buttons without NI screens")
+    p.add_argument("--allow-no-screens", action="store_true",
+                   help="Attempt NI displays, but continue HID controls and lights if unavailable")
     p.add_argument("--test-pattern", action="store_true", help="Send a fixed left/right screen test")
     p.add_argument("--window-title", default="Synthesia", help="Synthesia window title substring")
     p.add_argument("--capture-mode", choices=("fit", "fill", "stretch"))
@@ -99,6 +103,12 @@ def run(argv=None) -> int:
     if args.light_only and args.test_pattern:
         LOG.error("--test-pattern requires the Encdr helper")
         return 2
+    if args.light_only and args.hid_only:
+        LOG.error("--light-only (Python direct HID) and --hid-only (Rust HID/controls) conflict")
+        return 2
+    if args.hid_only and args.test_pattern:
+        LOG.error("--test-pattern requires screens; remove --hid-only")
+        return 2
 
     fps = args.fps if args.fps is not None else settings.fps
     if not 1 <= fps <= 30:
@@ -159,7 +169,12 @@ def run(argv=None) -> int:
     def on_hardware_event(event):
         kind = event.get("kind")
         if kind == "ready":
-            LOG.info("Encdr connected to %s", event.get("device"))
+            LOG.info("Hardware connected to %s (backend=%s, screens=%s)",
+                     event.get("device"), event.get("backend", "unknown"),
+                     event.get("screens", "unknown"))
+            return
+        if kind == "warning":
+            LOG.warning("Hardware: %s", event.get("message", "Nonfatal warning"))
             return
         if kind == "error":
             error = RuntimeError(str(event.get("message")))
@@ -208,7 +223,10 @@ def run(argv=None) -> int:
             else:
                 from .bridge import EncdrBridge
                 hardware = stack.enter_context(
-                    EncdrBridge(args.bridge, on_event=on_hardware_event, ni_role=args.ni_role)
+                    EncdrBridge(
+                        args.bridge, on_event=on_hardware_event, ni_role=args.ni_role,
+                        hid_only=args.hid_only, allow_no_screens=args.allow_no_screens
+                    )
                 )
 
             hardware.set_lights(light_guide.colors())
@@ -230,9 +248,15 @@ def run(argv=None) -> int:
                 while not stop.wait(0.2):
                     pass
             elif args.test_pattern:
+                if not hardware.screens:
+                    raise RuntimeError("Screen test requested but NI LCD service is unavailable")
                 hardware.set_lights(bytes([0x2D if i < 30 else 0x1D for i in range(61)]))
                 hardware.send_frame(diagnostic_pattern().convert("RGBA").tobytes())
                 LOG.info("Screen test pattern sent; Ctrl+C to exit")
+                while not stop.wait(0.2):
+                    pass
+            elif args.hid_only or hardware.screens is False:
+                LOG.info("HID-only running: Light Guide and S61 buttons enabled; LCD mirroring disabled. Ctrl+C to exit")
                 while not stop.wait(0.2):
                     pass
             else:

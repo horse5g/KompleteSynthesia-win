@@ -169,31 +169,65 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let hid = open_s61()?;
     eprintln!("S61 MK2 HID control/Light Guide interface opened successfully");
 
-    // The NI service is responsible for bulk display MI_03 on an official
-    // Windows driver installation. It must be installed and running.
-    let service = ni_service::connect_with_retry(PID, None, Duration::from_secs(5))
-        .map_err(|e| format!(
-            "S61 HID works, but NI screen registration failed: {e}. \
-             If NIHostIntegrationAgent and NIHardwareService are running, \
-             this is a protocol or client-registration issue, not missing USB drivers. \
-             Try --ni-role kontrol or --ni-role maschine for more targeted diagnostics."
-        ))?;
+    // HID events and the Light Guide are independent of MI_03 screen access.
+    // Two explicit modes allow useful operation while the NI service's
+    // third-party registration remains incompatible with this S61 MK2:
+    //   KSW_HID_ONLY=1         never contact the NI service
+    //   KSW_ALLOW_NO_SCREENS=1 try NI, then retain HID if it fails
+    let hid_only = std::env::var("KSW_HID_ONLY").ok().as_deref() == Some("1");
+    let allow_no_screens = std::env::var("KSW_ALLOW_NO_SCREENS").ok().as_deref() == Some("1");
 
-    // Decouple screen encoding and blocking NI service IPC from key presses.
-    let (screen_tx, screen_rx) = sync_channel::<Vec<u8>>(1);
-    let screen_thread = std::thread::Builder::new()
-        .name("s61-ni-screens".into())
-        .spawn(move || {
-            for frame in screen_rx {
-                if let Err(e) = send_panels(&service, &frame) {
-                    emit(json!({"kind": "error", "message": e}));
-                    break;
-                }
+    let service = if hid_only {
+        eprintln!("HID-only mode: skipping NI screen service entirely");
+        None
+    } else {
+        match ni_service::connect_with_retry(PID, None, Duration::from_secs(5)) {
+            Ok(service) => Some(service),
+            Err(err) if allow_no_screens => {
+                eprintln!("NI screen service unavailable, continuing HID-only: {err}");
+                emit(json!({
+                    "kind": "warning",
+                    "message": "NI LCD display connection unavailable; buttons and Light Guide remain enabled"
+                }));
+                None
             }
-        })?;
+            Err(err) => return Err(format!(
+                "S61 HID works, but NI screen registration failed: {err}. \
+                 Both services may be running; the registration protocol is not yet compatible. \
+                 Run with --hid-only to use hardware controls and lights without screens, \
+                 or --allow-no-screens to attempt screens then fall back."
+            ).into()),
+        }
+    };
+
+    // Keep the screen transfer thread optional. The HID event reader below
+    // stays live even when the NI display backend is unavailable.
+    let screen_transport = if let Some(service) = service {
+        let (screen_tx, screen_rx) = sync_channel::<Vec<u8>>(1);
+        let screen_thread = std::thread::Builder::new()
+            .name("s61-ni-screens".into())
+            .spawn(move || {
+                for frame in screen_rx {
+                    if let Err(e) = send_panels(&service, &frame) {
+                        emit(json!({"kind": "error", "message": e}));
+                        break;
+                    }
+                }
+            })?;
+        Some((screen_tx, screen_thread))
+    } else {
+        None
+    };
+    let screens_available = screen_transport.is_some();
+
     let commands = receive_commands();
     let mut state = ButtonState::default();
-    emit(json!({"kind":"ready", "device":"Komplete Kontrol S61 MK2", "backend":"hid+ni-service"}));
+    emit(json!({
+        "kind": "ready",
+        "device": "Komplete Kontrol S61 MK2",
+        "backend": if screens_available { "hid+ni-service" } else { "hid-only" },
+        "screens": screens_available
+    }));
 
     let mut input = [0u8; 128];
     loop {
@@ -213,10 +247,13 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 }
             }
             Ok(Command::Frame(pixels)) => {
-                match screen_tx.try_send(pixels) {
-                    Ok(()) | Err(TrySendError::Full(_)) => {}, // Keep latency low.
-                    Err(TrySendError::Disconnected(_)) => break,
+                if let Some((sender, _)) = screen_transport.as_ref() {
+                    match sender.try_send(pixels) {
+                        Ok(()) | Err(TrySendError::Full(_)) => {}, // Keep latency low.
+                        Err(TrySendError::Disconnected(_)) => break,
+                    }
                 }
+                // No screens: discard unexpected frames, keep HID responsive.
             }
             Ok(Command::Quit) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             Err(std::sync::mpsc::TryRecvError::Empty) => {},
@@ -225,8 +262,10 @@ pub fn run() -> Result<(), Box<dyn Error>> {
 
     // Stop all Light Guide colors before closing the HID interface.
     let _ = hid.write(&led_frame(&[0u8; 61]));
-    drop(screen_tx);
-    let _ = screen_thread.join();
+    if let Some((sender, worker)) = screen_transport {
+        drop(sender);
+        let _ = worker.join();
+    }
     Ok(())
 }
 
