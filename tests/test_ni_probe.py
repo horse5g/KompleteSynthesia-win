@@ -14,7 +14,10 @@ class NIHandshakeTests(unittest.TestCase):
     def test_distinct_client_identifiers(self):
         kontrol = device_connect(ROLE_KONTROL)
         maschine = device_connect(ROLE_MASCHINE)
-        self.assertEqual(len(kontrol), 20)
+        self.assertEqual(len(kontrol), 21)
+        self.assertEqual(kontrol[16:20], b"\x01\x00\x00\x00")
+        self.assertEqual(kontrol[-1], 0)
+        self.assertEqual(len(device_connect(ROLE_KONTROL, terminated_serial=False)), 20)
         self.assertEqual(kontrol[:8], bytes.fromhex("00 75 44 03 20 16 00 00"))
         self.assertEqual(struct.unpack_from("<I", kontrol, 8)[0], ROLE_KONTROL)
         self.assertEqual(struct.unpack_from("<I", maschine, 8)[0], ROLE_MASCHINE)
@@ -44,11 +47,12 @@ class NIHandshakeTests(unittest.TestCase):
             return bytes.fromhex("6c 74 63 65")
 
         output = diagnostics(probe_connections=True, exchange=exchange)
-        self.assertEqual(len(seen), 6)
-        self.assertTrue(any("connect Komplete Kontrol (KKiN): accepted" in s for s in output))
-        self.assertTrue(any("connect Maschine (NiM2): four-byte refusal" in s for s in output))
-        self.assertEqual(seen[1][1], device_connect(ROLE_KONTROL))
-        self.assertEqual(seen[2][1], device_connect(ROLE_MASCHINE))
+        self.assertEqual(len(seen), 10)
+        self.assertTrue(any("connect Komplete Kontrol (KKiN) [nul-terminated-21]: accepted" in s for s in output))
+        self.assertTrue(any("connect Maschine (NiM2) [nul-terminated-21]: four-byte refusal" in s for s in output))
+        self.assertEqual(seen[1][1], device_connect(ROLE_KONTROL, terminated_serial=True))
+        self.assertEqual(seen[2][1], device_connect(ROLE_KONTROL, terminated_serial=False))
+        self.assertEqual(seen[3][1], device_connect(ROLE_MASCHINE, terminated_serial=True))
 
     def test_error_continues_other_pipe(self):
         def exchange(name, message):

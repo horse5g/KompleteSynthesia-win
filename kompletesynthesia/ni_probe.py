@@ -22,9 +22,19 @@ ROLE_MASCHINE = 0x4E694D32  # "2MiN", the current Encdr default
 PRODUCT_S61_MK2 = 0x1620
 
 
-def device_connect(role: int, product: int = PRODUCT_S61_MK2) -> bytes:
-    """NI type registration header used by the existing Encdr service code."""
-    return struct.pack("<IIIII", 0x03447500, product, role, 0x70726D79, 0)
+def device_connect(
+    role: int, product: int = PRODUCT_S61_MK2, terminated_serial: bool = True
+) -> bytes:
+    """Build a device bootstrap frame with either Windows or legacy serial framing.
+
+    DrivenByKate sends 5 words with serial_len=1 and a trailing null even
+    without a specific serial. Earlier Encdr sent serial_len=0 with no null.
+    """
+    packet = struct.pack(
+        "<IIIII", 0x03447500, product, role, 0x70726D79,
+        1 if terminated_serial else 0,
+    )
+    return packet + (b"\x00" if terminated_serial else b"")
 
 
 def describe_reply(reply: bytes) -> str:
@@ -36,6 +46,8 @@ def describe_reply(reply: bytes) -> str:
         return f"accepted (len={len(reply)}, first bytes={prefix})"
     if len(reply) == 4:
         return f"four-byte refusal/status (hex={prefix}, ascii={reply.decode('ascii', 'replace')!r})"
+    if len(reply) == 8:
+        return f"8-byte response (hex={prefix}; not a registration-acceptance marker)"
     return f"unexpected response (len={len(reply)}, first bytes={prefix})"
 
 
@@ -87,11 +99,13 @@ def diagnostics(
             continue
         for label, role in (("Komplete Kontrol (KKiN)", ROLE_KONTROL),
                             ("Maschine (NiM2)", ROLE_MASCHINE)):
-            try:
-                result = exchange(pipe, device_connect(role))
-                lines.append(f"  connect {label}: {describe_reply(result)}")
-            except OSError as exc:
-                lines.append(f"  connect {label}: unavailable ({exc})")
+            for framing, terminated in (("nul-terminated-21", True),
+                                         ("zero-length-20", False)):
+                try:
+                    result = exchange(pipe, device_connect(role, terminated_serial=terminated))
+                    lines.append(f"  connect {label} [{framing}]: {describe_reply(result)}")
+                except OSError as exc:
+                    lines.append(f"  connect {label} [{framing}]: unavailable ({exc})")
     if not probe_connections:
         lines.append("For temporary client-registration probes, add --probe-ni-handshakes.")
     else:
