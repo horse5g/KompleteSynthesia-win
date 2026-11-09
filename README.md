@@ -254,3 +254,43 @@ This is still hardware-unverified: if device registration succeeds but
 instance registration or LCD frame submission fails, retain the exact logs
 to identify the next incompatibility. No drivers or installed NI services
 are modified.
+
+
+## Hardware controls and lights when NI screens are unavailable
+
+The S61 MK2 can have a fully working HID Light Guide/control interface
+even while the official Native Instruments named-pipe service rejects
+third-party display registration. All 20-byte and 21-byte requests with
+KKiN and NiM2 were rejected on a real S61 MK2 despite running services;
+the four-byte reply is not a verified documented error code.
+
+A new **HID-only** mode allows the app to use the Light Guide *and*
+button/jogwheel events without needing an LCD service connection:
+
+    python -m kompletesynthesia --hid-only --no-midi
+
+With a separate MIDI loopback configured for Synthesia's light output:
+
+    python -m kompletesynthesia --hid-only --midi-port "Your MIDI Loopback"
+
+If you want screens when available but prefer controls/lighting to continue
+if NI registration fails:
+
+    python -m kompletesynthesia --allow-no-screens --no-midi
+
+The terminal will say when it falls back, and the helper's ready event
+includes `"screens": false`. In fallback mode video capture is disabled,
+so the app does not waste CPU grabbing and encoding invisible LCD frames.
+
+These options do not change drivers, interrupt NI services, or try to
+reset the S61. The existing `--light-only` mode is still the Python direct
+HID diagnostic; unlike `--hid-only` it doesn't process hardware buttons.
+
+**For investigating the display protocol:** Open the official Komplete
+Kontrol application and check whether the keyboard's dual LCDs display
+its UI. If the official app also cannot use the screens, fix its own
+device integration before attempting a third-party protocol. If the
+official app does control both screens, its actual NI connection traffic
+or a documented compatible reference implementation is the next
+evidence needed. Further ungrounded identifier/framing guesses are not
+a good use of the test loop.

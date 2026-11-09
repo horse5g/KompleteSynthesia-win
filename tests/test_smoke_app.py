@@ -11,6 +11,8 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(args.fps, 15)
         self.assertEqual(args.ni_role, "auto")
         self.assertEqual(parser().parse_args(["--ni-role", "kontrol"]).ni_role, "kontrol")
+        self.assertTrue(parser().parse_args(["--hid-only"]).hid_only)
+        self.assertTrue(parser().parse_args(["--allow-no-screens"]).allow_no_screens)
 
     def test_initialize_settings_offline(self):
         with tempfile.TemporaryDirectory() as directory:
